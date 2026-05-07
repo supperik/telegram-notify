@@ -25,7 +25,7 @@ telegram-notify-skill/
 ## Installation
 
 ```text
-/plugin marketplace add https://raw.githubusercontent.com/supperik/telegram-notify/main/.claude-plugin/marketplace.json
+/plugin marketplace add https://raw.githubusercontent.com/supperik/telegram-notify/master/.claude-plugin/marketplace.json
 /plugin install telegram-notify
 ```
 

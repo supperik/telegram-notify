@@ -8,8 +8,8 @@
       "name": "telegram-notify",
       "description": "Approval gate + completion notifier for Claude Code, all over Telegram.",
       "source": {
-        "type": "github",
-        "repo": "supperik/telegram-notify"
+        "type": "git",
+        "url": "https://github.com/supperik/telegram-notify.git"
       }
     }
   ]
