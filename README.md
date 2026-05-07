@@ -15,21 +15,21 @@ Both skills share a single bot and a single chat — set `TELEGRAM_BOT_TOKEN` / 
 telegram-notify-skill/
 ├── .claude-plugin/plugin.json     ← manifest
 ├── hooks.json                     ← plugin-level Stop hook
-├── marketplace.json               ← local marketplace (for /plugin install from disk)
+├── marketplace.json               ← marketplace descriptor (where to fetch the plugin from)
 ├── lib/telegram_client.py         ← shared Telegram API helpers (stdlib-only)
 └── skills/
     ├── approval-gate/             ← migrated from the standalone telegram-approval-gate
     └── send-completion-message/   ← new in this plugin
 ```
 
-## Installation (local development)
+## Installation
 
 ```text
-/plugin marketplace add C:\Users\nikita.popov\projects\telegram-notify-skill\marketplace.json
-/plugin install telegram-notify@telegram-notify-local
+/plugin marketplace add https://raw.githubusercontent.com/supperik/telegram-notify/main/marketplace.json
+/plugin install telegram-notify
 ```
 
-Or copy `marketplace.json` somewhere stable and reference it by path.
+The marketplace descriptor lives in this repo's `marketplace.json`; it points the loader at this same repository on GitHub. If you forked or moved it, swap the URL above for the raw URL of your `marketplace.json`, and update `source` inside `marketplace.json` to match (supported `source.type` values: `github`, `git`, `local`).
 
 ## Required environment
 
@@ -87,7 +87,3 @@ python -m py_compile lib/telegram_client.py \
 python skills/send-completion-message/scripts/send_completion_message.py \
   --text "smoke test" --summary "from telegram-notify plugin install"
 ```
-
-## License
-
-MIT.
