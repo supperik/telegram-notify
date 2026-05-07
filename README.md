@@ -15,7 +15,7 @@ Both skills share a single bot and a single chat — set `TELEGRAM_BOT_TOKEN` / 
 telegram-notify-skill/
 ├── .claude-plugin/plugin.json     ← manifest
 ├── hooks.json                     ← plugin-level Stop hook
-├── marketplace.json               ← marketplace descriptor (where to fetch the plugin from)
+├── .claude-plugin/marketplace.json ← marketplace descriptor (where to fetch the plugin from)
 ├── lib/telegram_client.py         ← shared Telegram API helpers (stdlib-only)
 └── skills/
     ├── approval-gate/             ← migrated from the standalone telegram-approval-gate
@@ -25,11 +25,11 @@ telegram-notify-skill/
 ## Installation
 
 ```text
-/plugin marketplace add https://raw.githubusercontent.com/supperik/telegram-notify/main/marketplace.json
+/plugin marketplace add https://raw.githubusercontent.com/supperik/telegram-notify/main/.claude-plugin/marketplace.json
 /plugin install telegram-notify
 ```
 
-The marketplace descriptor lives in this repo's `marketplace.json`; it points the loader at this same repository on GitHub. If you forked or moved it, swap the URL above for the raw URL of your `marketplace.json`, and update `source` inside `marketplace.json` to match (supported `source.type` values: `github`, `git`, `local`).
+The marketplace descriptor lives in this repo's `.claude-plugin/marketplace.json`; it points the loader at this same repository on GitHub. If you forked or moved it, swap the URL above for the raw URL of your `marketplace.json`, and update `source` inside `marketplace.json` to match (supported `source.type` values: `github`, `git`, `local`).
 
 ## Required environment
 
@@ -73,7 +73,7 @@ Each skill is also usable standalone — copy `skills/<skill>/` somewhere, set t
 
 ```bash
 # JSON manifests parse
-python -c "import json; [json.load(open(p)) for p in ['.claude-plugin/plugin.json','hooks.json','marketplace.json']]"
+python -c "import json; [json.load(open(p)) for p in ['.claude-plugin/plugin.json','.claude-plugin/marketplace.json','hooks.json']]"
 
 # Python sources compile
 python -m py_compile lib/telegram_client.py \
