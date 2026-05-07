@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local env / secrets — must never land in the repo
+.env
+.env.*
+*.token
+*.secret
+secrets/
+
+# Local config overrides
+.claude/settings.local.json

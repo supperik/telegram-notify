@@ -1,0 +1,28 @@
+{
+  "_comment_for_humans": [
+    "Snippet for ~/.claude/settings.json when installing send-completion-message",
+    "WITHOUT the parent telegram-notify plugin (the plugin already wires this up).",
+    "Replace /ABSOLUTE/PATH/TO/ with where you cloned the skill, then merge into",
+    "your existing settings.json. Strip the _comment_ block before saving —",
+    "Claude Code does not skip unknown keys at the top level."
+  ],
+
+  "env": {
+    "TELEGRAM_BOT_TOKEN": "${TELEGRAM_BOT_TOKEN}",
+    "TELEGRAM_CHAT_ID": "${TELEGRAM_CHAT_ID}",
+    "TELEGRAM_COMPLETION_COOLDOWN_SECONDS": "600"
+  },
+
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /ABSOLUTE/PATH/TO/send-completion-message/hooks/stop-hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}

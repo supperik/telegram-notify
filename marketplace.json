@@ -1,0 +1,16 @@
+{
+  "name": "telegram-notify-local",
+  "owner": {
+    "name": "Nikita Popov"
+  },
+  "plugins": [
+    {
+      "name": "telegram-notify",
+      "description": "Approval gate + completion notifier for Claude Code, all over Telegram.",
+      "source": {
+        "type": "local",
+        "path": "C:\\Users\\nikita.popov\\projects\\telegram-notify-skill"
+      }
+    }
+  ]
+}
