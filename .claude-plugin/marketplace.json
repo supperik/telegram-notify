@@ -1,17 +1,13 @@
 {
-  "name": "telegram-notify",
-  "owner": {
-    "name": "supperik"
-  },
+  "name": "telegram-notify-marketplace",
+  "description": "Telegram-bridged notifications and human-in-the-loop for Claude Code.",
+  "owner": { "name": "supperik" },
   "plugins": [
     {
       "name": "telegram-notify",
-      "description": "Approval gate + completion notifier for Claude Code, all over Telegram.",
-      "version": "0.1.0",
-      "source": {
-        "source": "git",
-        "url": "https://github.com/supperik/telegram-notify.git"
-      }
+      "source": "./",
+      "description": "Approval gate (binary + picker) and work-completion notifier, both over Telegram.",
+      "version": "0.1.0"
     }
   ]
 }
