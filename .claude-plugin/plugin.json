@@ -1,6 +1,6 @@
 {
   "name": "telegram-notify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Telegram-bridged notifications and human-in-the-loop for Claude Code: approval gate (binary + picker) and work-completion notifier.",
   "author": {
     "name": "zupperik"

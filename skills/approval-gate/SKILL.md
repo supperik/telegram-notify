@@ -56,6 +56,30 @@ Optional:
 
 See `README.md` for one-time setup.
 
+## Picker mode (`--option`)
+
+Picker mode replaces the binary Approve/Reject UI with arbitrary inline buttons. Use it whenever you'd otherwise ask the user a multi-choice question in chat — phone-friendly decisions belong here.
+
+Contract:
+
+1. **A free-text escape hatch is mandatory.** Every picker must offer the approver a way to answer "none of the above" — otherwise they're forced into a wrong answer when reality doesn't fit your options. If you don't pass any `--option ...:prompt_comment` yourself, the script **auto-injects** one (label localized via `TELEGRAM_GATE_LANG`, value `custom`). Disable only when the option set is genuinely exhaustive — pass `--no-custom-option`.
+2. **`--details` is capped at 3500 characters.** Longer values are truncated with a visible note so the assembled message stays under Telegram's 4096-char ceiling. Don't paste full payloads — summarize.
+3. Option `value`s must match `[A-Za-z0-9_-]+`, max 40 chars (callback_data limit). `label` is free unicode and is what the user reads.
+
+Example:
+
+```bash
+python scripts/request_telegram_approval.py \
+  --title "Where to put the new migrations?" \
+  --details "Currently in src/db/. Alternative — repo-root /migrations." \
+  --risk medium \
+  --option "Move to /migrations:move" \
+  --option "Keep in src/db:keep"
+# → free-text "Своё предложение" button is added automatically
+```
+
+Output is a single JSON line on stdout: `{"decision","user","comment","request_id"}`. Exit `0` on any choice, `2` on timeout, `3` on config error, `4` on API error.
+
 ## What the user sees
 
 The script sends a Markdown message with inline Approve/Reject buttons:

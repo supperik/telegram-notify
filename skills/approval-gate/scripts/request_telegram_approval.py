@@ -40,23 +40,18 @@ import re
 import sys
 import time
 import uuid
-from pathlib import Path
+import urllib.error
+import urllib.parse
+import urllib.request
 
-# Bootstrap: add the plugin's shared lib/ to sys.path. This script lives at
-# <plugin_root>/skills/approval-gate/scripts/request_telegram_approval.py,
-# so the plugin root is parents[3].
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "lib"))
-
-from telegram_client import (  # noqa: E402  -- sys.path adjusted above
-    CODE_BLOCK_MAX_DEFAULT as _CODE_BLOCK_MAX,
-    DEFAULT_API_BASE,
-    api_call as _api_call,
-    escape_md as _escape_md,
-    format_code_block as _format_code_block,
-    reconfigure_stdio_utf8,
-)
-
-reconfigure_stdio_utf8()
+# Force UTF-8 on stdio so emoji and dashes in messages don't blow up under
+# Windows' default cp1252 console. .reconfigure exists on Python 3.7+.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (ValueError, OSError):
+            pass
 
 # Exit codes — kept as module constants so callers (hooks, wrappers) can import.
 EXIT_APPROVED = 0
@@ -65,9 +60,25 @@ EXIT_TIMEOUT = 2
 EXIT_CONFIG_ERROR = 3
 EXIT_API_ERROR = 4
 
+DEFAULT_API_BASE = "https://api.telegram.org"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_COMMENT_TIMEOUT_SECONDS = 90
 LONG_POLL_MAX = 25  # Telegram caps long-poll at 50s; 25s keeps responsiveness
+
+# Telegram caps a text message at 4096 chars. We reserve room for the title,
+# details, risk, request_id, instructions, and Markdown overhead — leaves
+# this much for the optional --command code block.
+_CODE_BLOCK_MAX = 3500
+
+# Same Telegram 4096-char cap applies to --details. Truncate explicitly with
+# a visible note rather than letting sendMessage fail with HTTP 400.
+_DETAILS_MAX = 3500
+
+# Auto-inject default for picker mode: every picker call must offer a way to
+# type a free-form answer. If the caller hasn't included one, we append this
+# option automatically (suppressible via --no-custom-option).
+_AUTO_CUSTOM_VALUE = "custom"
+_AUTO_CUSTOM_LABELS = {"ru": "Своё предложение", "en": "Custom answer"}
 
 # Telegram's callback_data limit is 64 bytes after UTF-8 encoding. We embed
 # "opt:{value}:{request_id}", so the value field has roughly 47 ASCII bytes of
@@ -75,6 +86,95 @@ LONG_POLL_MAX = 25  # Telegram caps long-poll at 50s; 25s keeps responsiveness
 # read, the value is just an identifier.
 _OPTION_VALUE_MAX = 40
 _OPTION_VALUE_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
+
+
+# ---------------------------------------------------------------------------
+# Telegram API helpers
+# ---------------------------------------------------------------------------
+
+
+def _api_call(token: str, method: str, params: dict | None = None,
+              http_timeout: int = 30, api_base: str = DEFAULT_API_BASE) -> dict:
+    """POST to the Telegram Bot API. Returns parsed JSON. Raises RuntimeError on failure.
+
+    Note: `token` never appears in error messages — only the method name does.
+    """
+    url = f"{api_base}/bot{token}/{method}"
+    body = json.dumps(params or {}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=http_timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            err_payload = json.loads(raw)
+            description = err_payload.get("description", raw)
+        except json.JSONDecodeError:
+            description = raw
+        raise RuntimeError(f"Telegram API HTTP {e.code} on {method}: {description}") from None
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Telegram API network error on {method}: {e.reason}") from None
+    except (TimeoutError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"Telegram API protocol error on {method}: {e}") from None
+
+    if not payload.get("ok"):
+        raise RuntimeError(f"Telegram API rejected {method}: {payload.get('description', payload)}")
+    return payload
+
+
+def _escape_md(text: str) -> str:
+    """Conservative escaping for Telegram Markdown (legacy parse_mode='Markdown').
+
+    We use legacy Markdown rather than MarkdownV2 because it has fewer reserved
+    characters and is forgiving with arbitrary user-supplied detail strings.
+    Just neutralize the four characters that can break a message.
+    """
+    if text is None:
+        return ""
+    out = str(text)
+    for ch, repl in (("\\", "\\\\"), ("`", "'"), ("*", "·"), ("_", " ")):
+        out = out.replace(ch, repl)
+    return out
+
+
+def _truncate_details(text: str) -> str:
+    """Cap --details at `_DETAILS_MAX` so the assembled message stays under
+    Telegram's 4096-char limit. Appends a visible note so the user knows
+    there's more than what's shown.
+    """
+    if not text or len(text) <= _DETAILS_MAX:
+        return text or ""
+    return text[:_DETAILS_MAX] + f"\n… (truncated; full length {len(text)} chars)"
+
+
+def _resolve_custom_label() -> str:
+    """Pick the auto-injected custom-option label based on TELEGRAM_GATE_LANG."""
+    lang = os.environ.get("TELEGRAM_GATE_LANG", "en").strip().lower()
+    return _AUTO_CUSTOM_LABELS.get(lang, _AUTO_CUSTOM_LABELS["en"])
+
+
+def _format_code_block(content: str) -> str:
+    """Wrap content in a Markdown triple-backtick block.
+
+    `language` is intentionally omitted — Telegram clients auto-detect for
+    common shells/scripts, and legacy Markdown doesn't support a language hint
+    anyway (that's MarkdownV2). Inner triple-backticks are neutralized so the
+    block can't close early on the user; very long content is truncated with a
+    visible note so the user knows there's more.
+    """
+    if not content:
+        return ""
+    safe = content.replace("```", "` ` `")
+    if len(safe) > _CODE_BLOCK_MAX:
+        truncated = safe[:_CODE_BLOCK_MAX]
+        safe = truncated + f"\n... (truncated; full length {len(content)} chars)"
+    return f"```\n{safe}\n```"
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +197,7 @@ def send_approval_message(token: str, chat_id: str, title: str, details: str,
         f"*Action:* {_escape_md(title)}",
     ]
     if details:
-        parts.append(f"*Details:* {_escape_md(details)}")
+        parts.append(f"*Details:* {_escape_md(_truncate_details(details))}")
     if command:
         parts.append(_format_code_block(command))
     parts.extend([
@@ -354,7 +454,7 @@ def send_options_message(token: str, chat_id: str, title: str, details: str,
         f"*Action:* {_escape_md(title)}",
     ]
     if details:
-        parts.append(f"*Details:* {_escape_md(details)}")
+        parts.append(f"*Details:* {_escape_md(_truncate_details(details))}")
     if command:
         parts.append(_format_code_block(command))
     parts.extend([
@@ -538,7 +638,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "Repeat for each option. Append ':prompt_comment' to a value to "
                         "request a follow-up text comment after the click. When --option "
                         "is used, the script prints a JSON {decision,user,comment,request_id} "
-                        "to stdout and exits 0 on any choice (instead of 0/1 for approve/reject).")
+                        "to stdout and exits 0 on any choice (instead of 0/1 for approve/reject). "
+                        "If no provided option has the 'prompt_comment' flag, a free-text "
+                        "fallback button is auto-injected so the approver always has a way to "
+                        "answer 'none of the above'. Disable with --no-custom-option.")
+    p.add_argument("--no-custom-option", action="store_true",
+                   help="Suppress the auto-injected free-text fallback option in picker mode. "
+                        "Use only when the set of choices is genuinely exhaustive and a "
+                        "free-form answer would be meaningless.")
     p.add_argument("--comment-timeout-seconds", type=int, default=DEFAULT_COMMENT_TIMEOUT_SECONDS,
                    help=f"Seconds to wait for a follow-up comment after a 'prompt_comment' "
                         f"button is clicked (default: {DEFAULT_COMMENT_TIMEOUT_SECONDS}). "
@@ -635,6 +742,22 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: duplicate --option value '{opt['value']}'.", file=sys.stderr)
                 return EXIT_CONFIG_ERROR
             seen.add(opt["value"])
+
+        # Picker contract: there must always be a free-text escape hatch unless
+        # the caller explicitly opted out. If none of the supplied options has
+        # prompt_comment, append a localized "custom answer" option.
+        if not args.no_custom_option and not any(o["prompt_comment"] for o in options):
+            value = _AUTO_CUSTOM_VALUE
+            suffix = 1
+            while value in seen:
+                value = f"{_AUTO_CUSTOM_VALUE}_{suffix}"
+                suffix += 1
+            options.append({
+                "label": _resolve_custom_label(),
+                "value": value,
+                "prompt_comment": True,
+            })
+            seen.add(value)
 
         if not args.quiet:
             approvers_preview = ",".join(str(i) for i in sorted(approver_ids))
