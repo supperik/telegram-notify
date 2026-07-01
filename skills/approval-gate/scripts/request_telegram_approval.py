@@ -251,8 +251,11 @@ def wait_for_decision(token: str, request_id: str, timeout_seconds: int,
 
     Returns ('approve'|'reject', user_label, reason_or_None) or None on timeout.
     Decisions are accepted only from `approver_ids` (Telegram numeric user IDs);
-    everything else is logged and ignored. Updates older than `sent_at` are
-    skipped so a reply written before the request can't approve it.
+    everything else is logged and ignored. (Stale replies from prior runs are
+    already excluded by the getUpdates offset baseline plus the per-request
+    UUID, so no timestamp comparison against the local clock is needed —
+    comparing Telegram's server time to a drifted local clock dropped valid
+    decisions.)
     """
     deadline = time.time() + timeout_seconds
     offset = _baseline_offset(token, api_base)
@@ -291,10 +294,6 @@ def _decision_from_update(update: dict, request_id: str, sent_at: float,
     # Inline keyboard button press.
     cq = update.get("callback_query")
     if cq is not None:
-        # callback_query has no .date — fall back to the originating message's date.
-        msg_date = (cq.get("message") or {}).get("date", 0)
-        if msg_date and msg_date < int(sent_at) - 5:
-            return None
         data = (cq.get("data") or "").strip()
         from_user = cq.get("from") or {}
         if not _is_authorized(from_user, approver_ids):
@@ -318,8 +317,6 @@ def _decision_from_update(update: dict, request_id: str, sent_at: float,
     # Plain text reply.
     msg = update.get("message") or update.get("channel_post")
     if not msg:
-        return None
-    if msg.get("date", 0) < int(sent_at):
         return None
     text = (msg.get("text") or "").strip()
     if not text:
@@ -515,10 +512,6 @@ def wait_for_options_decision(token: str, chat_id: str, request_id: str,
             if cq is None:
                 continue
 
-            msg_date = (cq.get("message") or {}).get("date", 0)
-            if msg_date and msg_date < int(sent_at) - 5:
-                continue
-
             data = (cq.get("data") or "").strip()
             from_user = cq.get("from") or {}
 
@@ -599,8 +592,6 @@ def _wait_for_comment(token: str, offset: int | None, click_time: float,
         for update in resp.get("result", []):
             offset = update["update_id"] + 1
             msg = update.get("message") or {}
-            if msg.get("date", 0) < int(click_time):
-                continue
             from_user = msg.get("from") or {}
             if from_user.get("id") != expected_user_id:
                 continue
