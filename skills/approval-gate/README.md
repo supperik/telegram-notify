@@ -80,7 +80,7 @@ python scripts/request_telegram_approval.py \
   --timeout-seconds 60
 ```
 
-Open Telegram, tap ✅ Approve. The script should print `APPROVED by <you>` and exit 0. Tap ❌ Reject and it should exit 1.
+Open Telegram, tap ✅ Одобрить. The script should print `APPROVED by <you>` and exit 0. Tap ❌ Отклонить and it should exit 1. (The Telegram message is in Russian; the `APPROVED by …` line is the script's stdout, kept English for callers that parse it.)
 
 ---
 

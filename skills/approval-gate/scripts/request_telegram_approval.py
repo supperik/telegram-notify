@@ -78,7 +78,23 @@ _DETAILS_MAX = 3500
 # type a free-form answer. If the caller hasn't included one, we append this
 # option automatically (suppressible via --no-custom-option).
 _AUTO_CUSTOM_VALUE = "custom"
-_AUTO_CUSTOM_LABELS = {"ru": "Своё предложение", "en": "Custom answer"}
+_CUSTOM_LABEL = "Своё предложение"
+
+# Russian display labels for the four --risk levels. The CLI value stays a
+# latin identifier (it's what callers pass); only what the user reads in the
+# Telegram message is localized.
+_RISK_LABELS = {
+    "low": "низкий",
+    "medium": "средний",
+    "high": "высокий",
+    "critical": "критический",
+}
+
+# Recommended-option marker for picker mode. Every picker must mark at least
+# one option as the model's recommended choice (enforced in main()); the
+# chosen button is wrapped with these so it stands out on the phone.
+_RECOMMEND_PREFIX = "⭐ "
+_RECOMMEND_SUFFIX = " (рекомендую)"
 
 # Telegram's callback_data limit is 64 bytes after UTF-8 encoding. We embed
 # "opt:{value}:{request_id}", so the value field has roughly 47 ASCII bytes of
@@ -153,10 +169,16 @@ def _truncate_details(text: str) -> str:
     return text[:_DETAILS_MAX] + f"\n… (truncated; full length {len(text)} chars)"
 
 
-def _resolve_custom_label() -> str:
-    """Pick the auto-injected custom-option label based on TELEGRAM_GATE_LANG."""
-    lang = os.environ.get("TELEGRAM_GATE_LANG", "en").strip().lower()
-    return _AUTO_CUSTOM_LABELS.get(lang, _AUTO_CUSTOM_LABELS["en"])
+def _risk_label(risk: str) -> str:
+    """Localized display label for a --risk value (falls back to the raw value)."""
+    return _RISK_LABELS.get(risk, risk)
+
+
+def _button_text(opt: dict) -> str:
+    """Telegram button caption for a picker option, with the recommended marker."""
+    if opt.get("recommended"):
+        return f"{_RECOMMEND_PREFIX}{opt['label']}{_RECOMMEND_SUFFIX}"
+    return opt["label"]
 
 
 def _format_code_block(content: str) -> str:
@@ -192,21 +214,21 @@ def send_approval_message(token: str, chat_id: str, title: str, details: str,
     lives, untruncated up to ~3500 chars.
     """
     parts = [
-        "🔐 *Approval required*",
+        "🔐 *Требуется подтверждение*",
         "",
-        f"*Action:* {_escape_md(title)}",
+        f"*Действие:* {_escape_md(title)}",
     ]
     if details:
-        parts.append(f"*Details:* {_escape_md(_truncate_details(details))}")
+        parts.append(f"*Детали:* {_escape_md(_truncate_details(details))}")
     if command:
         parts.append(_format_code_block(command))
     parts.extend([
-        f"*Risk:* {_escape_md(risk)}",
-        f"*Request ID:* `{request_id}`",
+        f"*Риск:* {_escape_md(_risk_label(risk))}",
+        f"*ID запроса:* `{request_id}`",
         "",
-        "Use the buttons below, or reply with:",
+        "Нажми кнопку ниже или ответь сообщением:",
         f"`APPROVE {request_id}`",
-        f"`REJECT {request_id} <reason>`",
+        f"`REJECT {request_id} <причина>`",
     ])
     payload = {
         "chat_id": chat_id,
@@ -215,8 +237,8 @@ def send_approval_message(token: str, chat_id: str, title: str, details: str,
         "disable_web_page_preview": True,
         "reply_markup": {
             "inline_keyboard": [[
-                {"text": "✅ Approve", "callback_data": f"approve:{request_id}"},
-                {"text": "❌ Reject", "callback_data": f"reject:{request_id}"},
+                {"text": "✅ Одобрить", "callback_data": f"approve:{request_id}"},
+                {"text": "❌ Отклонить", "callback_data": f"reject:{request_id}"},
             ]]
         },
     }
@@ -301,17 +323,17 @@ def _decision_from_update(update: dict, request_id: str, sent_at: float,
             # with a generic refusal so Telegram's UI doesn't hang, and log
             # the attempt for the operator.
             _log_unauthorized(from_user, "callback", data)
-            _ack_callback(token, cq["id"], "Not authorized", api_base)
+            _ack_callback(token, cq["id"], "Нет доступа", api_base)
             return None
         user = _user_label(from_user)
         if data == f"approve:{request_id}":
-            _ack_callback(token, cq["id"], "Approved ✅", api_base)
+            _ack_callback(token, cq["id"], "Одобрено ✅", api_base)
             return ("approve", user, None)
         if data == f"reject:{request_id}":
-            _ack_callback(token, cq["id"], "Rejected ❌", api_base)
+            _ack_callback(token, cq["id"], "Отклонено ❌", api_base)
             return ("reject", user, None)
         # Buttons for a different request — politely no-op so Telegram stops the spinner.
-        _ack_callback(token, cq["id"], "Stale request — ignored", api_base)
+        _ack_callback(token, cq["id"], "Устаревший запрос — игнорирую", api_base)
         return None
 
     # Plain text reply.
@@ -433,7 +455,8 @@ def parse_option(spec: str) -> dict:
         raise ValueError(
             f"--option flag must be 'prompt_comment' or omitted, got: {flag!r}"
         )
-    return {"label": label, "value": value, "prompt_comment": flag == "prompt_comment"}
+    return {"label": label, "value": value,
+            "prompt_comment": flag == "prompt_comment", "recommended": False}
 
 
 def send_options_message(token: str, chat_id: str, title: str, details: str,
@@ -446,22 +469,24 @@ def send_options_message(token: str, chat_id: str, title: str, details: str,
     full text the user needs to see before deciding.
     """
     parts = [
-        "🔐 *Decision required*",
+        "🔐 *Требуется решение*",
         "",
-        f"*Action:* {_escape_md(title)}",
+        f"*Действие:* {_escape_md(title)}",
     ]
     if details:
-        parts.append(f"*Details:* {_escape_md(_truncate_details(details))}")
+        parts.append(f"*Детали:* {_escape_md(_truncate_details(details))}")
     if command:
         parts.append(_format_code_block(command))
     parts.extend([
-        f"*Risk:* {_escape_md(risk)}",
-        f"*Request ID:* `{request_id}`",
+        f"*Риск:* {_escape_md(_risk_label(risk))}",
+        f"*ID запроса:* `{request_id}`",
         "",
-        "Tap one of the buttons below.",
+        "Нажми одну из кнопок ниже.",
     ])
+    if any(opt.get("recommended") for opt in options):
+        parts.append("⭐ — рекомендуемый вариант")
     inline_keyboard = [
-        [{"text": opt["label"],
+        [{"text": _button_text(opt),
           "callback_data": f"opt:{opt['value']}:{request_id}"}]
         for opt in options
     ]
@@ -517,24 +542,24 @@ def wait_for_options_decision(token: str, chat_id: str, request_id: str,
 
             if not _is_authorized(from_user, approver_ids):
                 _log_unauthorized(from_user, "callback", data)
-                _ack_callback(token, cq["id"], "Not authorized", api_base)
+                _ack_callback(token, cq["id"], "Нет доступа", api_base)
                 continue
 
             if not data.startswith("opt:"):
-                _ack_callback(token, cq["id"], "Stale request — ignored", api_base)
+                _ack_callback(token, cq["id"], "Устаревший запрос — игнорирую", api_base)
                 continue
             try:
                 _, value, rid = data.split(":", 2)
             except ValueError:
-                _ack_callback(token, cq["id"], "Malformed", api_base)
+                _ack_callback(token, cq["id"], "Некорректный запрос", api_base)
                 continue
             if rid != request_id:
-                _ack_callback(token, cq["id"], "Stale request — ignored", api_base)
+                _ack_callback(token, cq["id"], "Устаревший запрос — игнорирую", api_base)
                 continue
 
             opt = options_by_value.get(value)
             if opt is None:
-                _ack_callback(token, cq["id"], "Unknown option", api_base)
+                _ack_callback(token, cq["id"], "Неизвестный вариант", api_base)
                 continue
 
             user_label = _user_label(from_user)
@@ -542,15 +567,15 @@ def wait_for_options_decision(token: str, chat_id: str, request_id: str,
 
             if opt["prompt_comment"]:
                 _ack_callback(token, cq["id"],
-                              f"Selected: {opt['label']} — send your comment",
+                              f"Выбрано: {opt['label']} — пришли комментарий",
                               api_base)
                 # Tell the chat what to do next so the user isn't guessing.
                 try:
                     _api_call(token, "sendMessage", {
                         "chat_id": chat_id,
-                        "text": (f"`{request_id}`: chose *{_escape_md(opt['label'])}*.\n"
-                                 f"Reply with your comment in the next message "
-                                 f"(or wait {comment_timeout_seconds}s to skip)."),
+                        "text": (f"`{request_id}`: выбрано *{_escape_md(opt['label'])}*.\n"
+                                 f"Ответь комментарием следующим сообщением "
+                                 f"(или подожди {comment_timeout_seconds} c, чтобы пропустить)."),
                         "parse_mode": "Markdown",
                     }, api_base=api_base)
                 except RuntimeError:
@@ -559,7 +584,7 @@ def wait_for_options_decision(token: str, chat_id: str, request_id: str,
                                             comment_timeout_seconds, api_base, user_id)
                 return {"value": value, "user": user_label, "comment": comment}
 
-            _ack_callback(token, cq["id"], f"Selected: {opt['label']}", api_base)
+            _ack_callback(token, cq["id"], f"Выбрано: {opt['label']}", api_base)
             return {"value": value, "user": user_label, "comment": None}
 
     return None
@@ -637,6 +662,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Suppress the auto-injected free-text fallback option in picker mode. "
                         "Use only when the set of choices is genuinely exhaustive and a "
                         "free-form answer would be meaningless.")
+    p.add_argument("--recommend", action="append", default=None, metavar="VALUE",
+                   help="Mark an --option VALUE as the model's recommended choice. Its "
+                        "button gets a ⭐ marker and a '(рекомендую)' suffix so it stands "
+                        "out on the phone. In picker mode at least one --recommend is "
+                        "REQUIRED (exit 3 otherwise) — the model must always recommend at "
+                        "least one option. Repeat to recommend several. The auto-injected "
+                        "free-text option can never be recommended.")
     p.add_argument("--comment-timeout-seconds", type=int, default=DEFAULT_COMMENT_TIMEOUT_SECONDS,
                    help=f"Seconds to wait for a follow-up comment after a 'prompt_comment' "
                         f"button is clicked (default: {DEFAULT_COMMENT_TIMEOUT_SECONDS}). "
@@ -734,6 +766,25 @@ def main(argv: list[str] | None = None) -> int:
                 return EXIT_CONFIG_ERROR
             seen.add(opt["value"])
 
+        # Picker rule: the model MUST recommend at least one option. Enforced
+        # here so it can't be skipped — the caller points --recommend at one of
+        # its own --option values. Validated against caller options only, before
+        # the free-text escape hatch is injected, so that auto-option can never
+        # be (and never needs to be) the recommendation.
+        recommend_values = [r.strip() for r in (args.recommend or []) if r.strip()]
+        for rv in recommend_values:
+            if rv not in seen:
+                print(f"ERROR: --recommend '{rv}' does not match any --option value.",
+                      file=sys.stderr)
+                return EXIT_CONFIG_ERROR
+        if not recommend_values:
+            print("ERROR: picker mode requires at least one --recommend VALUE — the "
+                  "model must mark at least one option as recommended.", file=sys.stderr)
+            return EXIT_CONFIG_ERROR
+        recommend_set = set(recommend_values)
+        for opt in options:
+            opt["recommended"] = opt["value"] in recommend_set
+
         # Picker contract: there must always be a free-text escape hatch unless
         # the caller explicitly opted out. If none of the supplied options has
         # prompt_comment, append a localized "custom answer" option.
@@ -744,16 +795,19 @@ def main(argv: list[str] | None = None) -> int:
                 value = f"{_AUTO_CUSTOM_VALUE}_{suffix}"
                 suffix += 1
             options.append({
-                "label": _resolve_custom_label(),
+                "label": _CUSTOM_LABEL,
                 "value": value,
                 "prompt_comment": True,
+                "recommended": False,
             })
             seen.add(value)
 
         if not args.quiet:
             approvers_preview = ",".join(str(i) for i in sorted(approver_ids))
-            opt_preview = ",".join(o["value"] + ("*" if o["prompt_comment"] else "")
-                                   for o in options)
+            opt_preview = ",".join(
+                o["value"] + ("*" if o["prompt_comment"] else "")
+                + ("!" if o.get("recommended") else "")
+                for o in options)
             print(f"[telegram-approval-gate] requesting decision (id={request_id}, "
                   f"risk={args.risk}, timeout={args.timeout_seconds}s, "
                   f"options=[{opt_preview}], approvers=[{approvers_preview}])",
@@ -775,14 +829,14 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("CANCELLED: interrupted while waiting for decision.", file=sys.stderr)
             _send_followup(token, chat_id, request_id,
-                           "request cancelled (interrupted)", api_base)
+                           "запрос отменён (прерывание)", api_base)
             return EXIT_REJECTED
 
         if decision is None:
             print(f"TIMEOUT: no decision received within {args.timeout_seconds}s "
                   f"(request_id={request_id}).", file=sys.stderr)
             _send_followup(token, chat_id, request_id,
-                           "⌛ timed out — no decision recorded", api_base)
+                           "⌛ таймаут — решение не зафиксировано", api_base)
             return EXIT_TIMEOUT
 
         out = {
@@ -794,9 +848,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(out, ensure_ascii=False))
         comment_tag = (f" — “{decision['comment']}”" if decision["comment"]
                        else "" if not any(o["prompt_comment"] for o in options)
-                       else " (no comment)")
+                       else " (без комментария)")
         _send_followup(token, chat_id, request_id,
-                       f"✅ chose `{decision['value']}` ({decision['user']}){comment_tag}",
+                       f"✅ выбрано `{decision['value']}` ({decision['user']}){comment_tag}",
                        api_base)
         return EXIT_APPROVED
 
@@ -822,24 +876,24 @@ def main(argv: list[str] | None = None) -> int:
                                      sent_at, api_base, approver_ids)
     except KeyboardInterrupt:
         print("REJECTED: interrupted while waiting for approval.", file=sys.stderr)
-        _send_followup(token, chat_id, request_id, "request cancelled (interrupted)", api_base)
+        _send_followup(token, chat_id, request_id, "запрос отменён (прерывание)", api_base)
         return EXIT_REJECTED
 
     if decision is None:
         print(f"TIMEOUT: no decision received within {args.timeout_seconds}s "
               f"(request_id={request_id}). Treating as rejection.", file=sys.stderr)
-        _send_followup(token, chat_id, request_id, "⌛ timed out — treated as rejection", api_base)
+        _send_followup(token, chat_id, request_id, "⌛ таймаут — засчитано как отказ", api_base)
         return EXIT_TIMEOUT
 
     verb, user, reason = decision
     if verb == "approve":
         print(f"APPROVED by {user} (request_id={request_id})")
-        _send_followup(token, chat_id, request_id, f"✅ approved by {user}", api_base)
+        _send_followup(token, chat_id, request_id, f"✅ одобрено ({user})", api_base)
         return EXIT_APPROVED
 
     reason_str = f": {reason}" if reason else ""
     print(f"REJECTED by {user} (request_id={request_id}){reason_str}", file=sys.stderr)
-    _send_followup(token, chat_id, request_id, f"❌ rejected by {user}{reason_str}", api_base)
+    _send_followup(token, chat_id, request_id, f"❌ отклонено ({user}){reason_str}", api_base)
     return EXIT_REJECTED
 
 

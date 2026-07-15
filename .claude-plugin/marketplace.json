@@ -7,7 +7,7 @@
       "name": "telegram-notify",
       "source": "./",
       "description": "Approval gate (binary + picker) and work-completion notifier, both over Telegram.",
-      "version": "0.2.1"
+      "version": "0.2.2"
     }
   ]
 }

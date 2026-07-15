@@ -62,9 +62,10 @@ Picker mode replaces the binary Approve/Reject UI with arbitrary inline buttons.
 
 Contract:
 
-1. **A free-text escape hatch is mandatory.** Every picker must offer the approver a way to answer "none of the above" — otherwise they're forced into a wrong answer when reality doesn't fit your options. If you don't pass any `--option ...:prompt_comment` yourself, the script **auto-injects** one (label localized via `TELEGRAM_GATE_LANG`, value `custom`). Disable only when the option set is genuinely exhaustive — pass `--no-custom-option`.
-2. **`--details` is capped at 3500 characters.** Longer values are truncated with a visible note so the assembled message stays under Telegram's 4096-char ceiling. Don't paste full payloads — summarize.
-3. Option `value`s must match `[A-Za-z0-9_-]+`, max 40 chars (callback_data limit). `label` is free unicode and is what the user reads.
+1. **Always recommend at least one option.** You (the model sending the request) must mark at least one `--option` as your recommended choice, with `--recommend <value>`. Its button gets a ⭐ marker and a `(рекомендую)` suffix so the user can decide with one glance. This is enforced — picker mode with **no** `--recommend` exits `3` and sends nothing. Repeat `--recommend` if several options are genuinely fine; the auto-injected free-text option can never be the recommendation.
+2. **A free-text escape hatch is mandatory.** Every picker must offer the approver a way to answer "none of the above" — otherwise they're forced into a wrong answer when reality doesn't fit your options. If you don't pass any `--option ...:prompt_comment` yourself, the script **auto-injects** one (labelled «Своё предложение», value `custom`). Disable only when the option set is genuinely exhaustive — pass `--no-custom-option`.
+3. **`--details` is capped at 3500 characters.** Longer values are truncated with a visible note so the assembled message stays under Telegram's 4096-char ceiling. Don't paste full payloads — summarize.
+4. Option `value`s must match `[A-Za-z0-9_-]+`, max 40 chars (callback_data limit). `label` is free unicode and is what the user reads.
 
 Example:
 
@@ -74,30 +75,34 @@ python scripts/request_telegram_approval.py \
   --details "Currently in src/db/. Alternative — repo-root /migrations." \
   --risk medium \
   --option "Move to /migrations:move" \
-  --option "Keep in src/db:keep"
-# → free-text "Своё предложение" button is added automatically
+  --option "Keep in src/db:keep" \
+  --recommend move
+# → the "Move to /migrations" button shows ⭐ … (рекомендую)
+# → free-text «Своё предложение» button is added automatically
 ```
 
-Output is a single JSON line on stdout: `{"decision","user","comment","request_id"}`. Exit `0` on any choice, `2` on timeout, `3` on config error, `4` on API error.
+Output is a single JSON line on stdout: `{"decision","user","comment","request_id"}`. Exit `0` on any choice, `2` on timeout, `3` on config error (including a missing `--recommend`), `4` on API error.
 
 ## What the user sees
 
-The script sends a Markdown message with inline Approve/Reject buttons:
+The script sends a Russian Markdown message with inline buttons (binary mode):
 
 ```
-🔐 Approval required
+🔐 Требуется подтверждение
 
-Action: Deploy to production?
-Details: Claude wants to run: npm run deploy:prod
-Risk: high
-Request ID: a1b2c3d4
+Действие: Deploy to production?
+Детали: Claude wants to run: npm run deploy:prod
+Риск: высокий
+ID запроса: a1b2c3d4
 
-[ ✅ Approve ]  [ ❌ Reject ]
+[ ✅ Одобрить ]  [ ❌ Отклонить ]
 
-Or reply with:
+Нажми кнопку ниже или ответь сообщением:
 APPROVE a1b2c3d4
-REJECT a1b2c3d4 <reason>
+REJECT a1b2c3d4 <причина>
 ```
+
+The UI chrome (labels, buttons, confirmations) is Russian; `--title`/`--details` render exactly as you pass them, and the `low`/`medium`/`high`/`critical` risk value is shown localized (низкий/средний/высокий/критический). The typed-reply keywords stay the literal tokens `APPROVE`/`REJECT` — they're a machine protocol, not UI text.
 
 Either the inline button **or** a typed reply works. The script ignores any message whose request ID doesn't match the one it just sent, so a stale `APPROVE` from earlier can't accidentally green-light the wrong action.
 
